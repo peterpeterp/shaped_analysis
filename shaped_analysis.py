@@ -313,6 +313,8 @@ class country_analysis(object):
         # get information about all files
         grids = [nn.split('_')[-2] for nn in glob.glob(self._working_dir+'/masks/*.nc4')]
         tag_dict = {grid:{} for grid in grids}
+        var_dict = {grid:[] for grid in grids}
+        self._tags = ['var_name']
         coords_dict = {grid:{} for grid in grids}
         for file_name in glob.glob(self._working_dir+'/gridded_data/*.nc4'):
             nc_in = xr.open_dataset(file_name)
@@ -322,7 +324,11 @@ class country_analysis(object):
                 if 'tag' in key:
                     if key.split('_')[-1] not in tag_dict[grid].keys():
                         tag_dict[grid][key.split('_')[-1]] = []
+                    if key.split('_')[-1] not in self._tags:
+                        self._tags += [key.split('_')[-1]]
                     tag_dict[grid][key.split('_')[-1]].append(val)
+            if var_name not in var_dict[grid]:
+                var_dict[grid] += [var_name]
             if 'time' not in coords_dict[grid].keys():
                 coords_dict[grid]['time'] = nc_in['time']
             else:
@@ -339,6 +345,8 @@ class country_analysis(object):
                 tmp_dict[key] = np.unique(val)
             coords = tmp_dict.copy()
             coords.update({key:val.values for key,val in coords_dict[grid].items()})
+            if len(var_dict[grid]) > 0:
+                coords['var_name']=var_dict[grid]
             dims = ['time','lat','lon']
             for key in sorted(coords.keys()):
                 if key not in dims:
@@ -353,7 +361,7 @@ class country_analysis(object):
             var_name = file_name.split('/')[-1].split('_')[2]
             grid = nc_in.attrs['grid']
 
-            indices = [nc_in[var_name].attrs['tag_'+dim_] for dim_ in self._data[grid].dims[:-3]]
+            indices = [var_name] + [nc_in[var_name].attrs['tag_'+dim_] for dim_ in self._data[grid].dims[:-3] if dim_ != 'var_name']
 
             '''
             this is really ugly but I don't know how to make this differently
@@ -374,7 +382,39 @@ class country_analysis(object):
             print('on grid: '+key)
             print(val.coords,'\n')
 
+    def area_average(self, regions=None):
 
+        self._area_averages = {}
+        for region in self._region_names.keys():
+            self._area_averages[region] = pd.DataFrame(columns=self._tags+['time','mask_style','value'])
+            for grid,tmp_masks in self._masks.items():
+                for mask_style,mask in tmp_masks.items():
+                    mask.values[np.isnan(mask.values)] = 0
+                    if grid in self._data.keys():
+                        tmp = self._data[grid].copy()
+                        tmp *= mask.loc[region]
+                        av = tmp.sum(axis=(-2,-1))
+
+                        tmp = xr.Dataset({'value':av}).to_dataframe()
+                        tmp.reset_index(inplace=True)
+                        tmp['mask_style'] = mask_style
+
+                        self._area_averages[region] = self._area_averages[region].append(tmp, sort=True)
+
+            self._area_averages[region].to_csv(self._working_dir+'processed_data/'+region+'_spatial_average.csv')
+
+    def plot_transient(self,region,var_name,tags):
+
+        region = 'BEN'
+        var_name = 'mslp'
+        tags = {'scenario':'hist','experiment':'CORDEX','model':'mpi'}
+
+        tmp = COU._area_averages[region]
+        tmp = tmp.loc[(tmp.var_name == var_name)]
+        for key,val in tags.items():
+            tmp = tmp.loc[(tmp[key])==val]
+        plt.plot(tmp.time,tmp.value)
+        plt.savefig(COU._working_dir+'plots/test.png')
 
 
 
@@ -382,7 +422,7 @@ class country_analysis(object):
 
 # COU = country_analysis(iso='BEN', working_directory='/home/pepflei/regioClim_2020/cou_data/BEN')
 # # COU.download_shapefile()
-# # COU.load_shapefile()
+# COU.load_shapefile()
 # # COU.create_masks(input_file='/p/projects/ikiimp/RCM_BC/ISIMIP2b_bc/GCMinput/monthly/pr/mon_pr_ECEARTH_rcp45_.nc4', mask_style='pop2015',add_mask_file = '/home/pepflei/CA/masks/population/population_1990_incrLat.nc', add_mask_name='pop2015', add_mask_var='mask')
 # COU.load_mask()
 # COU.zoom_data(input_file='/p/projects/ikiimp/RCM_BC/ISIMIP2b_bc/GCMinput/monthly/pr/mon_pr_ECEARTH_rcp45_.nc4',var_name='pr',given_var_name='pr',tag='rcp45')
@@ -394,12 +434,12 @@ class country_analysis(object):
 
 
 COU = country_analysis(iso='BEN', working_directory='/Users/peterpfleiderer/Projects/regioClim_2020/country_analysis/data/BEN')
-# COU.load_shapefile()
+COU.load_shapefile()
 # COU.identify_grid('/Users/peterpfleiderer/Projects/data/SST/COBE_sst_mon.nc')
 # COU.regrid_additional_mask(add_mask_file='/Users/peterpfleiderer/Projects/data/data_universal/population_2015_incrLat.nc', mask_name='pop2015', input_file='/Users/peterpfleiderer/Projects/data/SST/COBE_sst_mon.nc')
 # COU.create_masks(input_file='/Users/peterpfleiderer/Projects/data/SST/COBE_sst_mon.nc', var_name='SST', mask_style='pop2015',add_mask_file = '/Users/peterpfleiderer/Projects/data/data_universal/population_2015_incrLat.nc', add_mask_name='pop2015', add_mask_var='mask')
 # COU.create_masks(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_vws.nc', mask_style='pop2015',add_mask_file = '/Users/peterpfleiderer/Projects/data/data_universal/population_2015_incrLat.nc', add_mask_name='pop2015', add_mask_var='mask')
-# COU.load_mask()
+COU.load_mask()
 # # COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/SST/COBE_sst_mon.nc',var_name='sst',given_var_name='SST',tag='test')
 # COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_002_prmsl.nc',var_name='var2',given_var_name='mslp',tags={'scenario':'hist','experiment':'CORDEX','model':'mpi'})
 # COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_002_prmsl.nc',var_name='var2',given_var_name='mslp',tags={'scenario':'rcp45','experiment':'CORDEX','model':'mpi'})
@@ -408,6 +448,7 @@ COU = country_analysis(iso='BEN', working_directory='/Users/peterpfleiderer/Proj
 
 
 COU.load_data()
+COU.area_average()
 
 # COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_002_prmsl.nc',var_name='var2',given_var_name='mslp',tag='rcp85')
 # COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_vws.nc',var_name='var33',given_var_name='VWS',tag='JRA55')
