@@ -48,10 +48,10 @@ class country_analysis(object):
         to be tested
         '''
         current_dir=os.getcwd()
-        os.system('wget biogeo.ucdavis.edu/data/gadm2.8/shp/'+self._iso+'_adm_shp.zip')
+        os.chdir(self._working_dir)
         os.system('mkdir '+self._iso+'_adm_shp')
-        print(self._working_dir+self._iso+'_adm_shp')
-        os.chdir(self._working_dir+self._iso+'_adm_shp')
+        os.system('wget biogeo.ucdavis.edu/data/gadm2.8/shp/'+self._iso+'_adm_shp.zip')
+        os.chdir(self._working_dir + self._iso+'_adm_shp')
         os.system('unzip ../'+self._iso+'_adm_shp.zip')
         os.chdir(current_dir)
 
@@ -91,7 +91,7 @@ class country_analysis(object):
     # MASKS
     ##########
 
-    def load_mask(self,mask_style,small=True):
+    def load_mask(self):
         for mask_file in glob.glob(self._working_dir+'/masks/*.nc4'):
             small_grid = mask_file.split('_')[-2]
             if small_grid not in self._masks.keys():	self._masks[small_grid]={}
@@ -291,16 +291,7 @@ class country_analysis(object):
         nc_out_mask.attrs['mask_style'] = mask_style
         nc_out_mask.to_netcdf(self._working_dir+'/masks/'+self._iso+'_'+small_grid+'_'+mask_style+'.nc4')
 
-        # # save relevant mask
-        # mask_file=self._working_dir+'/masks/'+self._iso+'_'+grid+'_relevantGrids.nc4'
-        # relevant_mask = out_mask.loc[self._iso].copy()*np.nan
-        # relevant_mask[lats[0]:lats[-1]+1,lons[0]:lons[-1]+1] = 1
-        # nc_out_mask = xr.Dataset({'mask': relevant_mask})
-        # nc_out_mask.attrs['original_grid'] = grid
-        # nc_out_mask.attrs['grid'] = small_grid
-        # nc_out_mask.to_netcdf(mask_file)
-
-    def zoom_data(self,input_file,var_name,given_var_name=None,tag='someTag',lat_name='lat',lon_name='lon'):
+    def zoom_data(self,input_file,var_name,given_var_name=None,tags={},lat_name='lat',lon_name='lon'):
         lon,lat,grid,lon_shift = self.identify_grid(input_file,lat_name,lon_name)
         input = xr.open_dataset(input_file)[var_name].squeeze()
         mask = self._masks[self._grid_dict[grid]][list(self._masks[self._grid_dict[grid]].keys())[0]]
@@ -312,17 +303,94 @@ class country_analysis(object):
         out_data.attrs['original_grid'] = grid
         out_data.attrs['grid'] = self._grid_dict[grid]
         out_data.attrs['var_name_original'] = var_name
-        out_data.to_netcdf(self._working_dir+'/gridded_data/'+self._iso+'_'+self._grid_dict[grid]+'_'+given_var_name+'_'+tag+'.nc4')
+        tag = ''
+        for key,val in tags.items():
+            out_data[given_var_name].attrs['tag_'+key] = val
+            tag += '_'+key+'-'+val
+        out_data.to_netcdf(self._working_dir+'/gridded_data/'+self._iso+'_'+self._grid_dict[grid]+'_'+given_var_name+tag+'.nc4')
 
     def load_data(self):
-        small_grids = np.unique([mask_file.split('_')[-3] for mask_file in glob.glob(COU._working_dir+'/gridded_data/*.nc4')])
-        for small_grid in small_grids:
-            nc_in = xr.open_mfdataset(COU._working_dir+'/gridded_data/*'+small_grid+'*.nc4', concat_dim="tag", data_vars='minimal', coords='minimal')
+        # get information about all files
+        grids = [nn.split('_')[-2] for nn in glob.glob(self._working_dir+'/masks/*.nc4')]
+        tag_dict = {grid:{} for grid in grids}
+        coords_dict = {grid:{} for grid in grids}
+        for file_name in glob.glob(self._working_dir+'/gridded_data/*.nc4'):
+            nc_in = xr.open_dataset(file_name)
+            var_name = file_name.split('/')[-1].split('_')[2]
+            grid = nc_in.attrs['grid']
+            for key,val in nc_in[var_name].attrs.items():
+                if 'tag' in key:
+                    if key.split('_')[-1] not in tag_dict[grid].keys():
+                        tag_dict[grid][key.split('_')[-1]] = []
+                    tag_dict[grid][key.split('_')[-1]].append(val)
+            if 'time' not in coords_dict[grid].keys():
+                coords_dict[grid]['time'] = nc_in['time']
+            else:
+                coords_dict[grid]['time'].combine_first(nc_in['time'])
+            if 'lon' not in coords_dict[grid].keys():
+                coords_dict[grid]['lon'] = nc_in['lon']
+            if 'lat' not in coords_dict[grid].keys():
+                coords_dict[grid]['lat'] = nc_in['lat']
 
-            var_name = mask_file.split('_')[-2]
-            tag = mask_file.split('_')[-1].split('.')[0]
+        # create data arrays
+        self._data = {}
+        for grid,tmp_dict in tag_dict.items():
+            for key,val in tmp_dict.items():
+                tmp_dict[key] = np.unique(val)
+            coords = tmp_dict.copy()
+            coords.update({key:val.values for key,val in coords_dict[grid].items()})
+            dims = ['time','lat','lon']
+            for key in sorted(coords.keys()):
+                if key not in dims:
+                    dims = [key] + dims
+
+            if len(list(coords.keys())) > 0:
+                self._data[grid] = xr.DataArray(data=np.zeros([len(coords[key]) for key in dims])*np.nan, coords=coords, dims=dims)
+
+        # fill data arrays
+        for file_name in glob.glob(self._working_dir+'/gridded_data/*.nc4'):
+            nc_in = xr.open_dataset(file_name)
+            var_name = file_name.split('/')[-1].split('_')[2]
+            grid = nc_in.attrs['grid']
+
+            indices = [nc_in[var_name].attrs['tag_'+dim_] for dim_ in self._data[grid].dims[:-3]]
+
+            '''
+            this is really ugly but I don't know how to make this differently
+            '''
+            if len(indices) == 0:
+                self._data[grid].loc[nc_in.time,nc_in.lat,nc_in.lon]
+            if len(indices) == 1:
+                self._data[grid].loc[indices[0],nc_in.time,nc_in.lat,nc_in.lon]
+            if len(indices) == 2:
+                self._data[grid].loc[indices[0],indices[1],nc_in.time,nc_in.lat,nc_in.lon]
+            if len(indices) == 3:
+                self._data[grid].loc[indices[0],indices[1],indices[2],nc_in.time,nc_in.lat,nc_in.lon] = nc_in[var_name]
+            if len(indices) == 4:
+                self._data[grid].loc[indices[0],indices[1],indices[2],indices[3],nc_in.time,nc_in.lat,nc_in.lon] = nc_in[var_name]
+
+        print('Loaded data into self._data')
+        for key, val in self._data.items():
+            print('on grid: '+key)
+            print(val.coords,'\n')
 
 
+
+
+
+
+
+# COU = country_analysis(iso='BEN', working_directory='/home/pepflei/regioClim_2020/cou_data/BEN')
+# # COU.download_shapefile()
+# # COU.load_shapefile()
+# # COU.create_masks(input_file='/p/projects/ikiimp/RCM_BC/ISIMIP2b_bc/GCMinput/monthly/pr/mon_pr_ECEARTH_rcp45_.nc4', mask_style='pop2015',add_mask_file = '/home/pepflei/CA/masks/population/population_1990_incrLat.nc', add_mask_name='pop2015', add_mask_var='mask')
+# COU.load_mask()
+# COU.zoom_data(input_file='/p/projects/ikiimp/RCM_BC/ISIMIP2b_bc/GCMinput/monthly/pr/mon_pr_ECEARTH_rcp45_.nc4',var_name='pr',given_var_name='pr',tag='rcp45')
+# COU.zoom_data(input_file='/p/projects/ikiimp/RCM_BC/ISIMIP2b_bc/GCMinput/monthly/pr/mon_pr_ECEARTH_historical_.nc4',var_name='pr',given_var_name='pr',tag='rcp45')
+#
+# COU.load_data()
+#
+# asdas
 
 
 COU = country_analysis(iso='BEN', working_directory='/Users/peterpfleiderer/Projects/regioClim_2020/country_analysis/data/BEN')
@@ -331,11 +399,18 @@ COU = country_analysis(iso='BEN', working_directory='/Users/peterpfleiderer/Proj
 # COU.regrid_additional_mask(add_mask_file='/Users/peterpfleiderer/Projects/data/data_universal/population_2015_incrLat.nc', mask_name='pop2015', input_file='/Users/peterpfleiderer/Projects/data/SST/COBE_sst_mon.nc')
 # COU.create_masks(input_file='/Users/peterpfleiderer/Projects/data/SST/COBE_sst_mon.nc', var_name='SST', mask_style='pop2015',add_mask_file = '/Users/peterpfleiderer/Projects/data/data_universal/population_2015_incrLat.nc', add_mask_name='pop2015', add_mask_var='mask')
 # COU.create_masks(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_vws.nc', mask_style='pop2015',add_mask_file = '/Users/peterpfleiderer/Projects/data/data_universal/population_2015_incrLat.nc', add_mask_name='pop2015', add_mask_var='mask')
-COU.load_mask(mask_style='pop2015')
-# COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/SST/COBE_sst_mon.nc',var_name='sst',given_var_name='SST',tag='test')
-COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_002_prmsl.nc',var_name='var2',given_var_name='mslp',tag='hist')
-COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_002_prmsl.nc',var_name='var2',given_var_name='mslp',tag='rcp85')
-COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_vws.nc',var_name='var33',given_var_name='VWS',tag='JRA55')
+# COU.load_mask()
+# # COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/SST/COBE_sst_mon.nc',var_name='sst',given_var_name='SST',tag='test')
+# COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_002_prmsl.nc',var_name='var2',given_var_name='mslp',tags={'scenario':'hist','experiment':'CORDEX','model':'mpi'})
+# COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_002_prmsl.nc',var_name='var2',given_var_name='mslp',tags={'scenario':'rcp45','experiment':'CORDEX','model':'mpi'})
+# COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_002_prmsl.nc',var_name='var2',given_var_name='mslp',tags={'scenario':'hist','experiment':'CORDEX','model':'had'})
+# COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_002_prmsl.nc',var_name='var2',given_var_name='mslp',tags={'scenario':'rcp45','experiment':'CORDEX','model':'had'})
+
+
+COU.load_data()
+
+# COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_002_prmsl.nc',var_name='var2',given_var_name='mslp',tag='rcp85')
+# COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_vws.nc',var_name='var33',given_var_name='VWS',tag='JRA55')
 
 
 
