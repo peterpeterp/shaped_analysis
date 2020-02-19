@@ -40,7 +40,6 @@ class country_analysis(object):
 
         self._masks={}
         self._region_names = {}
-        self._masks = {}
         self._grid_dict = {}
 
     def download_shapefile(self):
@@ -386,7 +385,7 @@ class country_analysis(object):
 
         self._area_averages = {}
         for region in self._region_names.keys():
-            self._area_averages[region] = pd.DataFrame(columns=self._tags+['time','mask_style','value'])
+            csv = pd.DataFrame(columns=self._tags+['time','mask_style','value'])
             for grid,tmp_masks in self._masks.items():
                 for mask_style,mask in tmp_masks.items():
                     mask.values[np.isnan(mask.values)] = 0
@@ -394,30 +393,57 @@ class country_analysis(object):
                         tmp = self._data[grid].copy()
                         tmp *= mask.loc[region]
                         av = tmp.sum(axis=(-2,-1))
+                        self._area_averages[region] = av
 
                         tmp = xr.Dataset({'value':av}).to_dataframe()
                         tmp.reset_index(inplace=True)
                         tmp['mask_style'] = mask_style
 
-                        self._area_averages[region] = self._area_averages[region].append(tmp, sort=True)
+                        csv = csv.append(tmp, sort=True)
 
-            self._area_averages[region].to_csv(self._working_dir+'processed_data/'+region+'_spatial_average.csv')
+            csv.to_csv(self._working_dir+'processed_data/'+region+'_spatial_average.csv')
 
-    def plot_transient(self,region,var_name,tags):
+    def plot_transient_csv(self,region,var_name,tags):
 
         region = 'BEN'
-        var_name = 'mslp'
-        tags = {'scenario':'hist','experiment':'CORDEX','model':'mpi'}
+        tags = {'scenario':'hist','experiment':'CORDEX','var_name':'mslp'}
 
-        tmp = COU._area_averages[region]
-        tmp = tmp.loc[(tmp.var_name == var_name)]
+        tmp = xr.Dataset({'value':COU._area_averages[region]}).to_dataframe()
+        tmp.reset_index(inplace=True)
         for key,val in tags.items():
             tmp = tmp.loc[(tmp[key])==val]
+        tmp = tmp.to_xarray()
         plt.plot(tmp.time,tmp.value)
         plt.savefig(COU._working_dir+'plots/test.png')
 
 
+    def plot_transient(self,region,tags):
+        region = 'BEN'
+        tags = {'scenario':'hist','experiment':'CORDEX','var_name':'mslp'}
 
+        tmp = COU._area_averages[region]
+        indices = []
+        for key in tmp.dims[:-1]:
+            if key in tags.keys():
+                indices.append(tags[key])
+            else:
+                indices.append(tmp[key].values)
+        tmp = tmp.loc[tuple(indices)]
+
+        plt.close()
+        # plt.plot(tmp.time.values,tmp.mean(axis=0))
+        # plt.fill_between(tmp.time.values,tmp.min(axis=0),tmp.min(axis=0))
+
+        yearly = tmp.groupby('time.year').max('time')
+        plt.plot(yearly.year.values,yearly.mean(axis=0))
+
+        plt.savefig(COU._working_dir+'plots/test.png')
+
+
+        '''
+        annual mean
+        '''
+        tmp.groupby('time.year').max('time')
 
 
 # COU = country_analysis(iso='BEN', working_directory='/home/pepflei/regioClim_2020/cou_data/BEN')
