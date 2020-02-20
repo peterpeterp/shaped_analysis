@@ -466,7 +466,6 @@ class country_analysis(object):
 
                             av = tmp.sum(axis=(-2,-1))
 
-
                             tmp_ = xr.Dataset({'value':av}).to_dataframe()
                             tmp_ = tmp_.drop(columns=['region'])
                             tmp_.reset_index(inplace=True)
@@ -476,6 +475,24 @@ class country_analysis(object):
 
             for time_format in time_formats:
                 self._areaAverage[time_format].to_csv(self._working_dir+'areaAverage/'+region+'_'+time_format+'_areaAverage.csv')
+
+        self._areaAverage = {}
+        for time_format in time_formats:
+            self._areaAverage[time_format] = []
+        for grid,tmp1 in self._data.items():
+            for time_format,data in tmp1.items():
+                # if time_format not in self._areaAverage.keys():
+                #     self._areaAverage[time_format] = {}
+                tmp_styles = []
+                for mask_style,mask in self._masks[grid].items():
+                    tmp_regions = []
+                    for region in mask.region.values:
+                        tmp_regions.append(np.sum(data * mask.loc[region],axis=(-1,-2)))
+                    tmp_styles.append(xr.concat(tmp_regions, dim='region'))
+                self._areaAverage[time_format].append(xr.concat(tmp_styles, dim='mask_style'))
+        for time_format in time_formats:
+            for i in range(2):
+                self._areaAverage[time_format] = xr.concat(tmp_regions, dim='region')
 
     def load_area_averages():
         self._tag_combinations = load_pkl(self._working_dir+'meta_info.pkl')
@@ -507,7 +524,7 @@ class country_analysis(object):
                             if time_format not in self._areaAverage.keys():
                                 self._areaAverage[time_format] = data
                             else:
-                                self._areaAverage[time_format] = xr.concat([self._areaAverage[time_format],data])
+                                self._areaAverage[time_format] = xr.align(self._areaAverage[time_format],data, join='outer')[0]
 
                             asdas
 
