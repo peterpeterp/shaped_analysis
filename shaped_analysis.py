@@ -7,6 +7,7 @@ Class to analyze climate data on national (& sub national) scale
 # License: GNU General Public License v3.0
 
 import sys,glob,os,pickle
+from collections import Counter
 import numpy as np
 import xarray as xr
 import pandas as pd
@@ -318,20 +319,21 @@ class country_analysis(object):
         out_data.to_netcdf(self._working_dir+'/raw_data/'+self._iso+'_'+self._grid_dict[grid]+'_'+given_var_name+tag+'.nc4')
 
     def harmonize_time(self,tmp_time):
-        if np.median(np.diff(tmp.time.dt.year,1)[1:]) == 1: # yearly
-            tmp_time = np.array([np.datetime64(str(dd)[:4]+'-06-15T00:00:00.000000000') for dd in tmp_time])
+        _, index = np.unique(tmp_time, return_index=True)
+        if np.median(np.diff(tmp_time[index].dt.year,1)[1:]) == 1: # yearly
+            tmp_time = np.array([np.datetime64(str(dd)[:4]+'-06-15T00:00:00.000000000') for dd in tmp_time.values])
             time_format = 'yearly'
-        elif np.median(np.diff(tmp.time.dt.month,1)[1:]) == 1: # monthly
-            tmp_time = np.array([np.datetime64(str(dd)[:8]+'15T00:00:00.000000000') for dd in tmp_time])
+        elif np.median(np.diff(tmp_time[index].dt.month,1)[1:]) == 1: # monthly
+            tmp_time = np.array([np.datetime64(str(dd)[:8]+'15T00:00:00.000000000') for dd in tmp_time.values])
             time_format = 'monthly'
-        elif np.median(np.diff(tmp.time.dt.day,1)[1:]) == 1: # monthly
-            tmp_time = np.array([np.datetime64(str(dd)[:10]+'T00:00:00.000000000') for dd in tmp_time])
+        elif np.median(np.diff(tmp_time[index].dt.day,1)[1:]) == 1: # monthly
+            tmp_time = np.array([np.datetime64(str(dd)[:10]+'T00:00:00.000000000') for dd in tmp_time.values])
             time_format = 'daily'
         else:
-            print('time format not yearly, not monthly, not daily -> unknown')
             time_format = None
+            print('time format not yearly, not monthly, not daily -> unknown')
 
-        return tmp_time,time_format
+        return tmp_time,time_format, index
 
     def harmonize_data(self):
         # get information about all files
@@ -339,25 +341,33 @@ class country_analysis(object):
         self._tags = ['var_name']
         self._tag_combinations = {grid:{} for grid in grids}
         coords_dict = {grid:{'monthly':{'var_name':[]},'yearly':{'var_name':[]},'daily':{'var_name':[]}} for grid in grids}
+        coords_dict_area = {'monthly':{'var_name':[]},'yearly':{'var_name':[]},'daily':{'var_name':[]}}
         for file_name in glob.glob(self._working_dir+'/raw_data/*.nc4'):
             nc_in = xr.open_dataset(file_name)
             var_name = file_name.split('/')[-1].split('_')[2]
             grid = nc_in.attrs['grid']
 
             # identify and harmonize time format
-            tmp_time,time_format = self.harmonize_time(nc_in['time'].values)
+            tmp_time,time_format,index = self.harmonize_time(nc_in['time'])
+            if time_format is None:
+                print(file_name)
+                asdas
 
             # store coordinates
             if time_format is not None:
                 tmp_time = xr.DataArray(tmp_time, coords={'time':tmp_time}, dims=['time'])
                 if 'time' not in coords_dict[grid][time_format].keys():
                     coords_dict[grid][time_format]['time'] = tmp_time
+                    coords_dict_area[time_format]['time'] = nc_in['time']
                 else:
                     coords_dict[grid][time_format]['time'] = xr.concat([coords_dict[grid][time_format]['time'],tmp_time], dim='time')
+                    coords_dict_area[time_format]['time'] = xr.concat([coords_dict_area[time_format]['time'],tmp_time], dim='time')
                 if 'lon' not in coords_dict[grid][time_format].keys():
                     coords_dict[grid][time_format]['lon'] = nc_in['lon']
+                    coords_dict_area[time_format]['lon'] = nc_in['lon']
                 if 'lat' not in coords_dict[grid][time_format].keys():
                     coords_dict[grid][time_format]['lat'] = nc_in['lat']
+                    coords_dict_area[time_format]['lat'] = nc_in['lat']
 
                 # store tags
                 tag_combi = {'var_name':var_name}
@@ -372,11 +382,26 @@ class country_analysis(object):
                 if var_name not in coords_dict[grid][time_format]:
                     coords_dict[grid][time_format]['var_name'] += [var_name]
 
+                for key,val in nc_in[var_name].attrs.items():
+                    if 'tag' in key:
+                        tag_combi[key.split('_')[-1]] = val
+                        if key.split('_')[-1] not in coords_dict_area[time_format].keys():
+                            coords_dict_area[time_format][key.split('_')[-1]] = []
+                        if key.split('_')[-1] not in self._tags:
+                            self._tags += [key.split('_')[-1]]
+                        coords_dict_area[time_format][key.split('_')[-1]].append(val)
+                if var_name not in coords_dict_area[time_format]:
+                    coords_dict_area[time_format]['var_name'] += [var_name]
+
                 if time_format not in self._tag_combinations[grid].keys():
                     self._tag_combinations[grid][time_format] = {}
                 self._tag_combinations[grid][time_format][file_name] = tag_combi
 
         save_pkl(self._tag_combinations, self._working_dir+'meta_info.pkl')
+        for time_format,coords in coords_dict_area.items():
+            for key,val in coords.items():
+                coords[key] = np.unique(val)
+        save_pkl(coords_dict_area, self._working_dir+'coords_areaAverage.pkl')
 
         # create data arrays
         self._data = {grid:{} for grid in grids}
@@ -401,8 +426,10 @@ class country_analysis(object):
                 for file_name, tag_dict in tmp2_dict.items():
                     nc_in = xr.open_dataset(file_name)
                     var_name = file_name.split('/')[-1].split('_')[2]
-                    tmp_time,time_format = self.harmonize_time(nc_in['time'].values)
+                    tmp_time,time_format,index = self.harmonize_time(nc_in['time'])
+
                     nc_in['time'] = tmp_time
+                    nc_in = nc_in.isel(time=index)
 
                     indices = [tag_dict[dim] for dim  in self._data[grid][time_format].dims if dim not in ['time','lat','lon']]
 
@@ -443,8 +470,14 @@ class country_analysis(object):
 
     def area_average(self, regions=None):
         self._tag_combinations = load_pkl(self._working_dir+'meta_info.pkl')
+        coords_area = load_pkl(self._working_dir+'coords_areaAverage.pkl')
         self._areaAverage = {}
         time_formats = np.array([[time_format for time_format in tmp1.keys()] for tmp1 in self._tag_combinations.values()]).flatten()
+        for time_format in time_formats:
+            dims = [dim for dim in coords_area[time_format].keys() if dim not in ['lat','lon','time']] + ['time']
+            coords = {dim:coords_area[time_format][dim]  for dim in dims}
+            self._areaAverage[time_format] = xr.DataArray(data=np.zeros([len(coords[key]) for key in dims])*np.nan, coords=coords, dims=dims)
+
         for region in self._region_names.keys():
             for time_format in time_formats:
                 all_tags = []
@@ -452,47 +485,62 @@ class country_analysis(object):
                     for time_format,tmp2 in tmp1.items():
                         all_tags += list(tmp2[list(tmp2.keys())[0]].keys())
 
-                self._areaAverage[time_format] = pd.DataFrame(columns=all_tags+['mask_style','time','value'])
+                csv = pd.DataFrame(columns=all_tags+['mask_style','time','value'])
 
             for grid,tmp1 in self._tag_combinations.items():
                 for time_format,tmp2 in tmp1.items():
                     for tag_combi in tmp2.values():
                         tmp = self._data[grid][time_format].loc[tuple(tag_combi[dim] for dim in self._data[grid][time_format].dims[:-3])].copy()
-                        available = np.where(np.all(np.isnan(tmp.values), axis=(1,2))==False)[0]
-                        tmp = tmp[available]
 
                         for mask_style,mask in self._masks[grid].items():
                             tmp *= mask.loc[region]
 
                             av = tmp.sum(axis=(-2,-1))
 
+                            dims = self._data[grid][time_format].dims[:-2]
+                            coords = {dim:np.array([tag_dict[dim]])  for dim in dims if dim != 'time'}
+                            coords['time'] = self._data[grid][time_format].time
+                            slice_ = av.copy().values
+                            for i in range(len(dims)-1):
+                                slice_ = np.expand_dims(slice_,0)
+                            data = xr.DataArray(data = slice_, coords=coords, dims=dims)
+                            if time_format not in self._areaAverage.keys():
+                                self._areaAverage[time_format] = data
+                            else:
+                                self._areaAverage[time_format] = xr.auto_combine([self._areaAverage[time_format],data])
+
+
+                            print(self._areaAverage[time_format].shape)
+
+                            available = np.where(np.all(np.isnan(tmp.values), axis=(1,2))==False)[0]
+                            av = av[available]
                             tmp_ = xr.Dataset({'value':av}).to_dataframe()
                             tmp_ = tmp_.drop(columns=['region'])
                             tmp_.reset_index(inplace=True)
                             tmp_['mask_style'] = mask_style
 
-                            self._areaAverage[time_format] = self._areaAverage[time_format].append(tmp_, sort=True)
+                            csv = csv.append(tmp_, sort=True)
 
             for time_format in time_formats:
-                self._areaAverage[time_format].to_csv(self._working_dir+'areaAverage/'+region+'_'+time_format+'_areaAverage.csv')
+                csv.to_csv(self._working_dir+'areaAverage/'+region+'_'+time_format+'_areaAverage.csv')
 
-        self._areaAverage = {}
-        for time_format in time_formats:
-            self._areaAverage[time_format] = []
-        for grid,tmp1 in self._data.items():
-            for time_format,data in tmp1.items():
-                # if time_format not in self._areaAverage.keys():
-                #     self._areaAverage[time_format] = {}
-                tmp_styles = []
-                for mask_style,mask in self._masks[grid].items():
-                    tmp_regions = []
-                    for region in mask.region.values:
-                        tmp_regions.append(np.sum(data * mask.loc[region],axis=(-1,-2)))
-                    tmp_styles.append(xr.concat(tmp_regions, dim='region'))
-                self._areaAverage[time_format].append(xr.concat(tmp_styles, dim='mask_style'))
-        for time_format in time_formats:
-            for i in range(2):
-                self._areaAverage[time_format] = xr.concat(tmp_regions, dim='region')
+        # self._areaAverage = {}
+        # for time_format in time_formats:
+        #     self._areaAverage[time_format] = []
+        # for grid,tmp1 in self._data.items():
+        #     for time_format,data in tmp1.items():
+        #         # if time_format not in self._areaAverage.keys():
+        #         #     self._areaAverage[time_format] = {}
+        #         tmp_styles = []
+        #         for mask_style,mask in self._masks[grid].items():
+        #             tmp_regions = []
+        #             for region in mask.region.values:
+        #                 tmp_regions.append(np.sum(data * mask.loc[region],axis=(-1,-2)))
+        #             tmp_styles.append(xr.concat(tmp_regions, dim='region'))
+        #         self._areaAverage[time_format].append(xr.concat(tmp_styles, dim='mask_style'))
+        # for time_format in time_formats:
+        #     for i in range(2):
+        #         self._areaAverage[time_format] = xr.concat(tmp_regions, dim='region')
 
     def load_area_averages():
         self._tag_combinations = load_pkl(self._working_dir+'meta_info.pkl')
@@ -525,15 +573,7 @@ class country_analysis(object):
                                 self._areaAverage[time_format] = data
                             else:
                                 self._areaAverage[time_format] = xr.align(self._areaAverage[time_format],data, join='outer')[0]
-
-                            asdas
-
-
-            if time_format not in self._areaAverage.keys():
-                self._areaAverage[time_format] = tmp
-            else:
-                self._areaAverage[time_format] = self._areaAverage[time_format].append(tmp, sort=True)
-
+                            print(self._areaAverage[time_format].shape)
 
 
     def plot_transient_csv(self,region,var_name,tags):
@@ -595,10 +635,10 @@ COU.load_mask()
 # COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_002_prmsl.nc',var_name='var2',given_var_name='mslp',tags={'scenario':'rcp45','experiment':'CORDEX','model':'had'})
 
 
-# COU.harmonize_data()
+COU.harmonize_data()
 
 COU.load_data()
-
+asda
 COU.area_average()
 
 asdas
