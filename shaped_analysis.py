@@ -228,7 +228,7 @@ class country_analysis(object):
                         overlap[j,i] = intersect*np.cos(np.radians(lat[j]))
 
         # renormalize overlap to get sum(mask)=1
-        overlap_sum=sum(overlap.copy().flatten())
+        overlap_sum=np.nansum(overlap.copy().flatten())
         if overlap_sum!=0:
             output=overlap.copy()/overlap_sum
             # mask zeros
@@ -349,16 +349,13 @@ class country_analysis(object):
 
             # identify and harmonize time format
             tmp_time,time_format,index = self.harmonize_time(nc_in['time'])
-            if time_format is None:
-                print(file_name)
-                asdas
 
             # store coordinates
             if time_format is not None:
                 tmp_time = xr.DataArray(tmp_time, coords={'time':tmp_time}, dims=['time'])
                 if 'time' not in coords_dict[grid][time_format].keys():
                     coords_dict[grid][time_format]['time'] = tmp_time
-                    coords_dict_area[time_format]['time'] = nc_in['time']
+                    coords_dict_area[time_format]['time'] = tmp_time
                 else:
                     coords_dict[grid][time_format]['time'] = xr.concat([coords_dict[grid][time_format]['time'],tmp_time], dim='time')
                     coords_dict_area[time_format]['time'] = xr.concat([coords_dict_area[time_format]['time'],tmp_time], dim='time')
@@ -400,7 +397,7 @@ class country_analysis(object):
         save_pkl(self._tag_combinations, self._working_dir+'meta_info.pkl')
         for time_format,coords in coords_dict_area.items():
             for key,val in coords.items():
-                coords[key] = np.unique(val)
+                coords_dict_area[time_format][key] = np.unique(val)
         save_pkl(coords_dict_area, self._working_dir+'coords_areaAverage.pkl')
 
         # create data arrays
@@ -437,11 +434,11 @@ class country_analysis(object):
                     this is really ugly but I don't know how to make this differently
                     '''
                     if len(indices) == 0:
-                        self._data[grid][time_format].loc[nc_in.time,nc_in.lat,nc_in.lon]
+                        self._data[grid][time_format].loc[nc_in.time,nc_in.lat,nc_in.lon] = nc_in[var_name]
                     if len(indices) == 1:
-                        self._data[grid][time_format].loc[indices[0],nc_in.time,nc_in.lat,nc_in.lon]
+                        self._data[grid][time_format].loc[indices[0],nc_in.time,nc_in.lat,nc_in.lon] = nc_in[var_name]
                     if len(indices) == 2:
-                        self._data[grid][time_format].loc[indices[0],indices[1],nc_in.time,nc_in.lat,nc_in.lon]
+                        self._data[grid][time_format].loc[indices[0],indices[1],nc_in.time,nc_in.lat,nc_in.lon] = nc_in[var_name]
                     if len(indices) == 3:
                         self._data[grid][time_format].loc[indices[0],indices[1],indices[2],nc_in.time,nc_in.lat,nc_in.lon] = nc_in[var_name]
                     if len(indices) == 4:
@@ -476,6 +473,9 @@ class country_analysis(object):
         for time_format in time_formats:
             dims = [dim for dim in coords_area[time_format].keys() if dim not in ['lat','lon','time']] + ['time']
             coords = {dim:coords_area[time_format][dim]  for dim in dims}
+            coords['region'] = np.array(list(self._region_names.keys()))
+            coords['mask_style'] = np.array([list(tmp1.keys()) for grid,tmp1 in self._masks.items()]).flatten()
+            dims = ['mask_style','region'] + dims
             self._areaAverage[time_format] = xr.DataArray(data=np.zeros([len(coords[key]) for key in dims])*np.nan, coords=coords, dims=dims)
 
         for region in self._region_names.keys():
@@ -490,30 +490,38 @@ class country_analysis(object):
             for grid,tmp1 in self._tag_combinations.items():
                 for time_format,tmp2 in tmp1.items():
                     for tag_combi in tmp2.values():
-                        tmp = self._data[grid][time_format].loc[tuple(tag_combi[dim] for dim in self._data[grid][time_format].dims[:-3])].copy()
-
                         for mask_style,mask in self._masks[grid].items():
+                            tmp = self._data[grid][time_format].loc[tuple(tag_combi[dim] for dim in self._data[grid][time_format].dims[:-3])].copy()
+                            nans = np.isnan(tmp)
                             tmp *= mask.loc[region]
-
                             av = tmp.sum(axis=(-2,-1))
+                            av.values[np.all(nans, axis=(1,2))] = np.nan
 
-                            dims = self._data[grid][time_format].dims[:-2]
-                            coords = {dim:np.array([tag_dict[dim]])  for dim in dims if dim != 'time'}
-                            coords['time'] = self._data[grid][time_format].time
-                            slice_ = av.copy().values
-                            for i in range(len(dims)-1):
-                                slice_ = np.expand_dims(slice_,0)
-                            data = xr.DataArray(data = slice_, coords=coords, dims=dims)
-                            if time_format not in self._areaAverage.keys():
-                                self._areaAverage[time_format] = data
-                            else:
-                                self._areaAverage[time_format] = xr.auto_combine([self._areaAverage[time_format],data])
+                            tag_combi_ = tag_combi.copy()
+                            tag_combi_['region'] = region
+                            tag_combi_['mask_style'] = mask_style
+                            indices = [tag_combi_[dim] for dim  in self._areaAverage[time_format].dims if dim not in ['time']]
 
+                            if len(indices) == 0:
+                                self._areaAverage[time_format].loc[av.time] = av
+                            if len(indices) == 1:
+                                self._areaAverage[time_format].loc[indices[0],av.time] = av
+                            if len(indices) == 2:
+                                self._areaAverage[time_format].loc[indices[0],indices[1],av.time] = av
+                            if len(indices) == 3:
+                                self._areaAverage[time_format].loc[indices[0],indices[1],indices[2],av.time] = av
+                            if len(indices) == 4:
+                                self._areaAverage[time_format].loc[indices[0],indices[1],indices[2],indices[3],av.time] = av
+                            if len(indices) == 5:
+                                self._areaAverage[time_format].loc[indices[0],indices[1],indices[2],indices[3],indices[4],av.time] = av
+                            if len(indices) == 6:
+                                self._areaAverage[time_format].loc[indices[0],indices[1],indices[2],indices[3],indices[4],indices[5],av.time] = av
 
-                            print(self._areaAverage[time_format].shape)
+                            av = av[np.where(np.all(nans, axis=(1,2))==False)[0]]
 
-                            available = np.where(np.all(np.isnan(tmp.values), axis=(1,2))==False)[0]
-                            av = av[available]
+                            if tag_combi['var_name'] == 'tas' and av.min()<250 and av.min()>0:
+                                asdas
+
                             tmp_ = xr.Dataset({'value':av}).to_dataframe()
                             tmp_ = tmp_.drop(columns=['region'])
                             tmp_.reset_index(inplace=True)
@@ -524,110 +532,77 @@ class country_analysis(object):
             for time_format in time_formats:
                 csv.to_csv(self._working_dir+'areaAverage/'+region+'_'+time_format+'_areaAverage.csv')
 
-        # self._areaAverage = {}
-        # for time_format in time_formats:
-        #     self._areaAverage[time_format] = []
-        # for grid,tmp1 in self._data.items():
-        #     for time_format,data in tmp1.items():
-        #         # if time_format not in self._areaAverage.keys():
-        #         #     self._areaAverage[time_format] = {}
-        #         tmp_styles = []
-        #         for mask_style,mask in self._masks[grid].items():
-        #             tmp_regions = []
-        #             for region in mask.region.values:
-        #                 tmp_regions.append(np.sum(data * mask.loc[region],axis=(-1,-2)))
-        #             tmp_styles.append(xr.concat(tmp_regions, dim='region'))
-        #         self._areaAverage[time_format].append(xr.concat(tmp_styles, dim='mask_style'))
-        # for time_format in time_formats:
-        #     for i in range(2):
-        #         self._areaAverage[time_format] = xr.concat(tmp_regions, dim='region')
+        xr.Dataset(self._areaAverage).to_netcdf(self._working_dir+self._iso+'_areaAverages.nc')
 
-    def load_area_averages():
-        self._tag_combinations = load_pkl(self._working_dir+'meta_info.pkl')
-        self._areaAverage = {}
-        # for time_format in [ff.split('_')[-2] for ff in glob.glob(self._working_dir+'/areaAverage/*')]:
-        for file_name in glob.glob(self._working_dir+'/areaAverage/*'):
-            time_format = file_name.split('_')[-2]
-            tmp = pd.read_csv(file_name)
+    def load_area_average(self):
+        self._areaAverage = xr.open_dataset(self._working_dir+self._iso+'_areaAverages.nc')
 
-            dims = [dim for dim in tmp.columns if dim not in ['Unnamed: 0','value','time']] + ['time']
-            coords = {dim:np.unique(tmp[dim])  for dim in dims}
-            data = xr.DataArray(data = np.zeros([len(coords[dim]) for dim in dims])*np.nan, coords=coords, dims=dims)
+    # def plot_transient(self,region,time_format,tags):
+    #     time_format = 'monthly'
+    #     tags = {'scenario':'historical','experiment':'CORDEX','var_name':'pr','region':'BEN','mask_style':'latWeight'}
+    #
+    #     tmp = COU._areaAverage[time_format]
+    #     indices = []
+    #     for key in tmp.dims[:-1]:
+    #         if key in tags.keys():
+    #             indices.append(tags[key])
+    #         else:
+    #             indices.append(tmp[key].values)
+    #     tmp = tmp.loc[tuple(indices)]
+    #
+    #     plt.close()
+    #     plt.plot(tmp.time.values,tmp.mean(axis=0))
+    #     plt.fill_between(tmp.time.values,tmp.min(axis=0).values,tmp.max(axis=0).values, alpha=0.2)
+    #
+    #     # yearly = tmp.groupby('time.year').max('time')
+    #     # plt.plot(yearly.year.values,yearly.mean(axis=0))
+    #
+    #     plt.savefig(COU._working_dir+'plots/test.png')
+    #
+    #
+    #     '''
+    #     annual mean
+    #     '''
+    #     tmp.groupby('time.year').max('time')
 
-            for grid,tag_combis1 in self._tag_combinations.items():
-                for time_format,tag_combis in {key:val for key,val in tag_combis1.items() if key == time_format}.items():
-                    for tag_combi in tag_combis.values():
-                        slice = tmp.copy()
-                        for tag,val in tag_combi.items():
-                            slice = slice.loc[(slice[tag]==val)]
-                        for mask_style in np.unique(tmp.mask_style):
-                            slice_ = slice.loc[(slice['mask_style']==mask_style)]
-                            dims = [dim for dim in slice_.columns if dim not in ['Unnamed: 0','value','time']] + ['time']
-                            coords = {dim:np.unique(slice_[dim])  for dim in dims}
-                            slice_ = slice_['value'].values
-                            for i in range(len(dims)-1):
-                                slice_ = np.expand_dims(slice_,0)
-                            data = xr.DataArray(data = slice_, coords=coords, dims=dims)
-
-                            if time_format not in self._areaAverage.keys():
-                                self._areaAverage[time_format] = data
-                            else:
-                                self._areaAverage[time_format] = xr.align(self._areaAverage[time_format],data, join='outer')[0]
-                            print(self._areaAverage[time_format].shape)
-
-
-    def plot_transient_csv(self,region,var_name,tags):
-
-        region = 'BEN'
-        tags = {'scenario':'hist','experiment':'CORDEX','var_name':'mslp'}
-
-        tmp = xr.Dataset({'value':COU._area_averages[region]}).to_dataframe()
-        tmp.reset_index(inplace=True)
-        for key,val in tags.items():
-            tmp = tmp.loc[(tmp[key])==val]
-        tmp = tmp.to_xarray()
-        plt.plot(tmp.time,tmp.value)
-        plt.savefig(COU._working_dir+'plots/test.png')
-
-
-    def plot_transient(self,region,tags):
-        region = 'BEN'
-        tags = {'scenario':'hist','experiment':'CORDEX','var_name':'mslp'}
-
-        tmp = COU._area_averages[region]
+    def select_data(self, time_format, tags):
+        tmp = self._areaAverage[time_format]
         indices = []
         for key in tmp.dims[:-1]:
             if key in tags.keys():
                 indices.append(tags[key])
             else:
                 indices.append(tmp[key].values)
-        tmp = tmp.loc[tuple(indices)]
+        return tmp.loc[tuple(indices)]
 
-        plt.close()
-        # plt.plot(tmp.time.values,tmp.mean(axis=0))
-        # plt.fill_between(tmp.time.values,tmp.min(axis=0),tmp.min(axis=0))
+    # def merged_time(self,time_format,tags1,tags2):
+    #     tmps = []
+    #     for tags in [tags1,tags2]:
+    #         tmp = self._areaAverage[time_format]
+    #         indices = []
+    #         for key in tmp.dims[:-1]:
+    #             if key in tags.keys():
+    #                 indices.append(tags[key])
+    #             else:
+    #                 indices.append(tmp[key].values)
+    #         tmp = tmp.loc[tuple(indices)]
+    #         tmp = tmp[:,np.all(np.isnan(tmp), axis=0)==False]
+    #
+    #         tmps.append(tmp)
+    #
+    #     return xr.concat(tmps,dim='time')
 
-        yearly = tmp.groupby('time.year').max('time')
-        plt.plot(yearly.year.values,yearly.mean(axis=0))
-
-        plt.savefig(COU._working_dir+'plots/test.png')
-
-
-        '''
-        annual mean
-        '''
-        tmp.groupby('time.year').max('time')
 
 
 
 
 
 COU = country_analysis(iso='BEN', working_directory='/Users/peterpfleiderer/Projects/regioClim_2020/cou_data/BEN')
-COU.load_shapefile()
+# COU.load_shapefile()
 # COU.identify_grid('/Users/peterpfleiderer/Projects/data/SST/COBE_sst_mon.nc')
 # COU.create_masks(input_file='/Users/peterpfleiderer/Projects/data/SST/COBE_sst_mon.nc', var_name='SST', mask_style='pop2015',add_mask_file = '/Users/peterpfleiderer/Projects/data/data_universal/population_2015_incrLat.nc', add_mask_name='pop2015', add_mask_var='mask')
 # COU.create_masks(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_vws.nc', mask_style='pop2015',add_mask_file = '/Users/peterpfleiderer/Projects/data/data_universal/population_2015_incrLat.nc', add_mask_name='pop2015', add_mask_var='mask')
-COU.load_mask()
+# COU.load_mask()
 # # COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/SST/COBE_sst_mon.nc',var_name='sst',given_var_name='SST',tag='test')
 # COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_002_prmsl.nc',var_name='var2',given_var_name='mslp',tags={'scenario':'hist','experiment':'CORDEX','model':'mpi'})
 # COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_002_prmsl.nc',var_name='var2',given_var_name='mslp',tags={'scenario':'rcp45','experiment':'CORDEX','model':'mpi'})
@@ -635,11 +610,24 @@ COU.load_mask()
 # COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_002_prmsl.nc',var_name='var2',given_var_name='mslp',tags={'scenario':'rcp45','experiment':'CORDEX','model':'had'})
 
 
-COU.harmonize_data()
+# COU.harmonize_data()
+# COU.load_data()
+# COU.area_average()
+COU.load_area_average()
 
-COU.load_data()
-asda
-COU.area_average()
+plt.close()
+for scenario in ['historical','rcp45']:
+    tmp = COU.select_data('monthly',tags={'scenario':scenario,'experiment':'CORDEX','var_name':'tas','region':'BEN','mask_style':'latWeight'})
+    tmp = tmp[:,np.all(np.isnan(tmp), axis=0)==False]
+    tmp = tmp.groupby('time.year').mean('time')
+
+    plt.plot(tmp.year.values,tmp.mean(axis=0))
+    plt.fill_between(tmp.year.values,tmp.min(axis=0).values,tmp.max(axis=0).values, alpha=0.2)
+
+# yearly = tmp.groupby('time.year').max('time')
+# plt.plot(yearly.year.values,yearly.mean(axis=0))
+
+plt.savefig(COU._working_dir+'plots/test.png')
 
 asdas
 
