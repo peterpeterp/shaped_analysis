@@ -49,6 +49,7 @@ class country_analysis(object):
 		if os.path.isdir(self._working_dir+'/plots')==False: os.system('mkdir '+self._working_dir+'/plots')
 		if os.path.isdir(self._working_dir+'/gridded_data')==False:os.system('mkdir '+self._working_dir+'/gridded_data')
 		if os.path.isdir(self._working_dir+'/processed_data')==False:os.system('mkdir '+self._working_dir+'/processed_data')
+		if os.path.isdir(self._working_dir+'/raw_data')==False:os.system('mkdir '+self._working_dir+'/raw_data')
 
 		self._masks={}
 		self._region_names = {}
@@ -308,6 +309,7 @@ class country_analysis(object):
 		input = xr.open_dataset(input_file)[var_name].squeeze()
 		mask = self._masks[self._grid_dict[grid]][list(self._masks[self._grid_dict[grid]].keys())[0]]
 
+		imput.time.values = np.asarray(imput.time,'datetime64[ns]') 
 		zoomed_data = input.loc[:,mask.lat,mask.lon]
 		if time_cutoff is not None:
 			zoomed_data = zoomed_data.loc[time_cutoff[0]:time_cutoff[1],:,:]
