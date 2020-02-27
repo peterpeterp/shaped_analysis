@@ -304,15 +304,23 @@ class country_analysis(object):
 		nc_out_mask.attrs['mask_style'] = mask_style
 		nc_out_mask.to_netcdf(self._working_dir+'/masks/'+self._iso+'_'+small_grid+'_'+mask_style+'.nc4')
 
-	def zoom_data(self,input_file,var_name,given_var_name=None,tags={}, lat_name='lat', lon_name='lon', time_cutoff=None):
+	def zoom_data(self,input_file,var_name,given_var_name=None,tags={}, lat_name='lat', lon_name='lon', time_cutoff=None, data_type='data'):
 		lon,lat,grid,lon_shift = self.identify_grid(input_file,lat_name,lon_name)
-		input = xr.open_dataset(input_file)[var_name].squeeze()
+		_input = xr.open_dataset(input_file)[var_name].squeeze()
 		mask = self._masks[self._grid_dict[grid]][list(self._masks[self._grid_dict[grid]].keys())[0]]
 
-		imput.time.values = np.asarray(imput.time,'datetime64[ns]') 
-		zoomed_data = input.loc[:,mask.lat,mask.lon]
+		# clean data
+		_input.time.values = np.asarray(_input.time,'datetime64[s]')
+		med_diff = np.median(np.diff(_input.time,1))
+		time_steps = np.array([0] + [i+1 for i,tt in enumerate(np.diff(_input.time,1)) if np.abs(int(tt) - med_diff) < med_diff])
+		_input = _input[time_steps,:,:]
+
+		# zoom
+		zoomed_data = _input.loc[:,mask.lat,mask.lon]
+
+		# select
 		if time_cutoff is not None:
-			zoomed_data = zoomed_data.loc[time_cutoff[0]:time_cutoff[1],:,:]
+			zoomed_data.sel(time=slice('2006-01-01','2100-01-01'))
 
 		if given_var_name is None:
 			given_var_name = var_name
@@ -320,6 +328,8 @@ class country_analysis(object):
 		out_data.attrs['original_grid'] = grid
 		out_data.attrs['grid'] = self._grid_dict[grid]
 		out_data.attrs['var_name_original'] = var_name
+		out_data.attrs['data_type'] = data_type
+
 		tag = ''
 		for key,val in tags.items():
 			out_data[given_var_name].attrs['tag_'+key] = val
@@ -354,6 +364,7 @@ class country_analysis(object):
 			nc_in = xr.open_dataset(file_name)
 			var_name = file_name.split('/')[-1].split('_')[2]
 			grid = nc_in.attrs['grid']
+			data_type = nc_in.attrs['data_type']
 
 			# identify and harmonize time format
 			tmp_time,time_format,index = self.harmonize_time(nc_in['time'])
