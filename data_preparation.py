@@ -11,7 +11,7 @@ import shaped_analysis; importlib.reload(shaped_analysis)
 
 
 
-COU = country_analysis(iso='GHA', working_directory='/home/pepflei/regioClim_2020/cou_data/GHA')
+COU = shaped_analysis.country_analysis(iso='BEN', working_directory='/home/pepflei/regioClim_2020/cou_data/BEN')
 # COU.download_shapefile()
 COU.load_shapefile()
 # COU.create_masks(input_file='/p/projects/ikiimp/RCM_BC/ISIMIP2b_bc/GCMoutput/monthly/pr/mon_pr_ECEARTH_rcp45_20060101-21001231_BC.nc4', mask_style='pop2015',add_mask_file = '/home/pepflei/CA/masks/population/population_1990_incrLat.nc', add_mask_name='pop2015', add_mask_var='mask')
@@ -63,12 +63,12 @@ COU.zoom_data(input_file='/p/projects/tumble/carls/shared_folder/data/EWEMBI/mon
 
 COU.zoom_data(input_file='/p/projects/tumble/carls/shared_folder/data/EWEMBI/mon_year/mon_RX1_EWEMBI_1979-2014.nc4', var_name='pr', given_var_name='RX1', tags={'experiment':'EWEMBI','scenario':'historical','model':'EWEMBI'}, time_cutoff=['1950-01-01','2006-01-01'])
 
-COU.harmonize_data()
-COU.load_data()
-sadas
-
-
-
-
-COU.area_average()
-# asdas
+# COU.harmonize_data()
+# COU.load_data()
+# sadas
+#
+#
+#
+#
+# COU.area_average()
+# # asdas

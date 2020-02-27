@@ -6,7 +6,7 @@ Class to analyze climate data on national (& sub national) scale
 #
 # License: GNU General Public License v3.0
 
-import sys,glob,os,pickle
+import sys,glob,os,pickle,time
 from collections import Counter
 import numpy as np
 import xarray as xr
@@ -48,7 +48,7 @@ class country_analysis(object):
 		if os.path.isdir(self._working_dir+'/masks')==False: os.system('mkdir '+self._working_dir+'/masks')
 		if os.path.isdir(self._working_dir+'/plots')==False: os.system('mkdir '+self._working_dir+'/plots')
 		if os.path.isdir(self._working_dir+'/gridded_data')==False:os.system('mkdir '+self._working_dir+'/gridded_data')
-		if os.path.isdir(self._working_dir+'/processed_data')==False:os.system('mkdir '+self._working_dir+'/processed_data')
+		if os.path.isdir(self._working_dir+'/areaAverage')==False:os.system('mkdir '+self._working_dir+'/areaAverage')
 		if os.path.isdir(self._working_dir+'/raw_data')==False:os.system('mkdir '+self._working_dir+'/raw_data')
 
 		self._masks={}
@@ -304,7 +304,7 @@ class country_analysis(object):
 		nc_out_mask.attrs['mask_style'] = mask_style
 		nc_out_mask.to_netcdf(self._working_dir+'/masks/'+self._iso+'_'+small_grid+'_'+mask_style+'.nc4')
 
-	def zoom_data(self,input_file,var_name,given_var_name=None,tags={}, lat_name='lat', lon_name='lon', time_cutoff=None, data_type='data'):
+	def zoom_data(self,input_file,var_name,given_var_name=None,tags={}, lat_name='lat', lon_name='lon', time_cutoff=None):
 		lon,lat,grid,lon_shift = self.identify_grid(input_file,lat_name,lon_name)
 		_input = xr.open_dataset(input_file)[var_name].squeeze()
 		mask = self._masks[self._grid_dict[grid]][list(self._masks[self._grid_dict[grid]].keys())[0]]
@@ -328,7 +328,6 @@ class country_analysis(object):
 		out_data.attrs['original_grid'] = grid
 		out_data.attrs['grid'] = self._grid_dict[grid]
 		out_data.attrs['var_name_original'] = var_name
-		out_data.attrs['data_type'] = data_type
 
 		tag = ''
 		for key,val in tags.items():
@@ -353,18 +352,18 @@ class country_analysis(object):
 
 		return tmp_time,time_format, index
 
-	def harmonize_data(self):
+	def scout_data(self):
+		start = time.time()
 		# get information about all files
 		grids = [nn.split('_')[-2] for nn in glob.glob(self._working_dir+'/masks/*.nc4')]
 		self._tags = ['var_name']
-		self._tag_combinations = {grid:{} for grid in grids}
+		tag_combinations = {grid:{} for grid in grids}
 		coords_dict = {grid:{'monthly':{'var_name':[]},'yearly':{'var_name':[]},'daily':{'var_name':[]}} for grid in grids}
 		coords_dict_area = {'monthly':{'var_name':[]},'yearly':{'var_name':[]},'daily':{'var_name':[]}}
 		for file_name in glob.glob(self._working_dir+'/raw_data/*.nc4'):
 			nc_in = xr.open_dataset(file_name)
 			var_name = file_name.split('/')[-1].split('_')[2]
 			grid = nc_in.attrs['grid']
-			data_type = nc_in.attrs['data_type']
 
 			# identify and harmonize time format
 			tmp_time,time_format,index = self.harmonize_time(nc_in['time'])
@@ -409,18 +408,25 @@ class country_analysis(object):
 				if var_name not in coords_dict_area[time_format]:
 					coords_dict_area[time_format]['var_name'] += [var_name]
 
-				if time_format not in self._tag_combinations[grid].keys():
-					self._tag_combinations[grid][time_format] = {}
-				self._tag_combinations[grid][time_format][file_name] = tag_combi
+				if time_format not in tag_combinations[grid].keys():
+					tag_combinations[grid][time_format] = {}
+				tag_combinations[grid][time_format][file_name] = tag_combi
 
-		save_pkl(self._tag_combinations, self._working_dir+'meta_info.pkl')
+		save_pkl(tag_combinations, self._working_dir+'meta_info.pkl')
+		save_pkl(coords_dict, self._working_dir+'grided_coords.pkl')
 		for time_format,coords in coords_dict_area.items():
 			for key,val in coords.items():
 				coords_dict_area[time_format][key] = np.unique(val)
 		save_pkl(coords_dict_area, self._working_dir+'coords_areaAverage.pkl')
 
+		print(time.time() - start); start = time.time()
+
+	def read_gridded(self):
+		coords_dict = load_pkl(self._working_dir+'grided_coords.pkl')
+		tag_combinations = load_pkl(self._working_dir+'meta_info.pkl')
+
 		# create data arrays
-		self._data = {grid:{} for grid in grids}
+		self._data = {grid:{} for grid in coords_dict.keys()}
 		for grid,tmp_dict in coords_dict.items():
 			for time_format,coords in tmp_dict.items():
 				if len(coords['var_name']) > 0:
@@ -436,7 +442,7 @@ class country_analysis(object):
 					self._data[grid][time_format] = xr.DataArray(data=np.zeros([len(coords[key]) for key in dims])*np.nan, coords=coords, dims=dims)
 
 		# fill data arrays
-		for grid,tmp1_dict in self._tag_combinations.items():
+		for grid,tmp1_dict in tag_combinations.items():
 			for time_format, tmp2_dict in tmp1_dict.items():
 				for file_name, tag_dict in tmp2_dict.items():
 					nc_in = xr.open_dataset(file_name)
@@ -465,6 +471,7 @@ class country_analysis(object):
 				if len(list(tmp2_dict.keys())) > 0:
 					self._data[grid][time_format].sortby(['lat', 'lon','time'])
 
+	def print_data(self):
 		print('Loaded data into self._data')
 		for grid, tmp1_dict in self._data.items():
 			for time_format, tmp in tmp1_dict.items():
@@ -472,6 +479,8 @@ class country_analysis(object):
 				print('time format: '+time_format)
 				print(tmp.coords,'\n')
 				xr.Dataset({'data':tmp}).to_netcdf(self._working_dir+'gridded_data/'+'_'.join([self._iso,grid,time_format])+'.nc')
+
+		print(time.time() - start); start = time.time()
 
 	def load_data(self):
 		self._data = {}
@@ -488,10 +497,10 @@ class country_analysis(object):
 			self._data[grid][time_format] = nc_in['data'] * mask
 
 	def area_average(self, regions=None):
-		self._tag_combinations = load_pkl(self._working_dir+'meta_info.pkl')
+		tag_combinations = load_pkl(self._working_dir+'meta_info.pkl')
 		coords_area = load_pkl(self._working_dir+'coords_areaAverage.pkl')
 		self._areaAverage = {}
-		time_formats = np.array([[time_format for time_format in tmp1.keys()] for tmp1 in self._tag_combinations.values()]).flatten()
+		time_formats = np.array([[time_format for time_format in tmp1.keys()] for tmp1 in tag_combinations.values()]).flatten()
 		for time_format in time_formats:
 			dims = [dim for dim in coords_area[time_format].keys() if dim not in ['lat','lon','time']] + ['time']
 			coords = {dim:coords_area[time_format][dim]  for dim in dims}
@@ -503,13 +512,13 @@ class country_analysis(object):
 		for region in self._region_names.keys():
 			for time_format in time_formats:
 				all_tags = []
-				for grid,tmp1 in self._tag_combinations.items():
+				for grid,tmp1 in tag_combinations.items():
 					for time_format,tmp2 in tmp1.items():
 						all_tags += list(tmp2[list(tmp2.keys())[0]].keys())
 
 				csv = pd.DataFrame(columns=all_tags+['mask_style','time','value'])
 
-			for grid,tmp1 in self._tag_combinations.items():
+			for grid,tmp1 in tag_combinations.items():
 				for time_format,tmp2 in tmp1.items():
 					for tag_combi in tmp2.values():
 						for mask_style,mask in self._masks[grid].items():
@@ -586,7 +595,134 @@ class country_analysis(object):
 
 
 
-
-
+	# def harmonize_data(self):
+	# 	start = time.time()
+	# 	# get information about all files
+	# 	grids = [nn.split('_')[-2] for nn in glob.glob(self._working_dir+'/masks/*.nc4')]
+	# 	self._tags = ['var_name']
+	# 	tag_combinations = {grid:{} for grid in grids}
+	# 	coords_dict = {grid:{'monthly':{'var_name':[]},'yearly':{'var_name':[]},'daily':{'var_name':[]}} for grid in grids}
+	# 	coords_dict_area = {'monthly':{'var_name':[]},'yearly':{'var_name':[]},'daily':{'var_name':[]}}
+	# 	for file_name in glob.glob(self._working_dir+'/raw_data/*.nc4'):
+	# 		nc_in = xr.open_dataset(file_name)
+	# 		var_name = file_name.split('/')[-1].split('_')[2]
+	# 		grid = nc_in.attrs['grid']
+	#
+	# 		# identify and harmonize time format
+	# 		tmp_time,time_format,index = self.harmonize_time(nc_in['time'])
+	#
+	# 		# store coordinates
+	# 		if time_format is not None:
+	# 			tmp_time = xr.DataArray(tmp_time, coords={'time':tmp_time}, dims=['time'])
+	# 			if 'time' not in coords_dict[grid][time_format].keys():
+	# 				coords_dict[grid][time_format]['time'] = tmp_time
+	# 				coords_dict_area[time_format]['time'] = tmp_time
+	# 			else:
+	# 				coords_dict[grid][time_format]['time'] = xr.concat([coords_dict[grid][time_format]['time'],tmp_time], dim='time')
+	# 				coords_dict_area[time_format]['time'] = xr.concat([coords_dict_area[time_format]['time'],tmp_time], dim='time')
+	# 			if 'lon' not in coords_dict[grid][time_format].keys():
+	# 				coords_dict[grid][time_format]['lon'] = nc_in['lon']
+	# 				coords_dict_area[time_format]['lon'] = nc_in['lon']
+	# 			if 'lat' not in coords_dict[grid][time_format].keys():
+	# 				coords_dict[grid][time_format]['lat'] = nc_in['lat']
+	# 				coords_dict_area[time_format]['lat'] = nc_in['lat']
+	#
+	# 			# store tags
+	# 			tag_combi = {'var_name':var_name}
+	# 			for key,val in nc_in[var_name].attrs.items():
+	# 				if 'tag' in key:
+	# 					tag_combi[key.split('_')[-1]] = val
+	# 					if key.split('_')[-1] not in coords_dict[grid][time_format].keys():
+	# 						coords_dict[grid][time_format][key.split('_')[-1]] = []
+	# 					if key.split('_')[-1] not in self._tags:
+	# 						self._tags += [key.split('_')[-1]]
+	# 					coords_dict[grid][time_format][key.split('_')[-1]].append(val)
+	# 			if var_name not in coords_dict[grid][time_format]:
+	# 				coords_dict[grid][time_format]['var_name'] += [var_name]
+	#
+	# 			for key,val in nc_in[var_name].attrs.items():
+	# 				if 'tag' in key:
+	# 					tag_combi[key.split('_')[-1]] = val
+	# 					if key.split('_')[-1] not in coords_dict_area[time_format].keys():
+	# 						coords_dict_area[time_format][key.split('_')[-1]] = []
+	# 					if key.split('_')[-1] not in self._tags:
+	# 						self._tags += [key.split('_')[-1]]
+	# 					coords_dict_area[time_format][key.split('_')[-1]].append(val)
+	# 			if var_name not in coords_dict_area[time_format]:
+	# 				coords_dict_area[time_format]['var_name'] += [var_name]
+	#
+	# 			if time_format not in tag_combinations[grid].keys():
+	# 				tag_combinations[grid][time_format] = {}
+	# 			tag_combinations[grid][time_format][file_name] = tag_combi
+	#
+	# 	save_pkl(tag_combinations, self._working_dir+'meta_info.pkl')
+	# 	for time_format,coords in coords_dict_area.items():
+	# 		for key,val in coords.items():
+	# 			coords_dict_area[time_format][key] = np.unique(val)
+	# 	save_pkl(coords_dict_area, self._working_dir+'coords_areaAverage.pkl')
+	#
+	# 	print(time.time() - start); start = time.time()
+	#
+	# 	# create data arrays
+	# 	self._data = {grid:{} for grid in grids}
+	# 	for grid,tmp_dict in coords_dict.items():
+	# 		for time_format,coords in tmp_dict.items():
+	# 			if len(coords['var_name']) > 0:
+	# 				for key,val in coords.items():
+	# 					coords[key] = np.unique(val)
+	#
+	# 				dims = ['time','lat','lon']
+	# 				for key in sorted(coords.keys()):
+	# 					if key not in dims:
+	# 						dims = [key] + dims
+	#
+	# 				coords = {dim:coords[dim] for dim in dims}
+	# 				self._data[grid][time_format] = xr.DataArray(data=np.zeros([len(coords[key]) for key in dims])*np.nan, coords=coords, dims=dims)
+	#
+	# 	print(time.time() - start); start = time.time()
+	#
+	# 	# fill data arrays
+	# 	for grid,tmp1_dict in tag_combinations.items():
+	# 		for time_format, tmp2_dict in tmp1_dict.items():
+	# 			for file_name, tag_dict in tmp2_dict.items():
+	# 				nc_in = xr.open_dataset(file_name)
+	# 				var_name = file_name.split('/')[-1].split('_')[2]
+	# 				tmp_time,time_format,index = self.harmonize_time(nc_in['time'])
+	#
+	# 				nc_in['time'] = tmp_time
+	# 				nc_in = nc_in.isel(time=index)
+	#
+	# 				indices = [tag_dict[dim] for dim  in self._data[grid][time_format].dims if dim not in ['time','lat','lon']]
+	#
+	# 				'''
+	# 				this is really ugly but I don't know how to make this differently
+	# 				'''
+	# 				if len(indices) == 0:
+	# 					self._data[grid][time_format].loc[nc_in.time,nc_in.lat,nc_in.lon] = nc_in[var_name]
+	# 				if len(indices) == 1:
+	# 					self._data[grid][time_format].loc[indices[0],nc_in.time,nc_in.lat,nc_in.lon] = nc_in[var_name]
+	# 				if len(indices) == 2:
+	# 					self._data[grid][time_format].loc[indices[0],indices[1],nc_in.time,nc_in.lat,nc_in.lon] = nc_in[var_name]
+	# 				if len(indices) == 3:
+	# 					self._data[grid][time_format].loc[indices[0],indices[1],indices[2],nc_in.time,nc_in.lat,nc_in.lon] = nc_in[var_name]
+	# 				if len(indices) == 4:
+	# 					self._data[grid][time_format].loc[indices[0],indices[1],indices[2],indices[3],nc_in.time,nc_in.lat,nc_in.lon] = nc_in[var_name]
+	#
+	# 			if len(list(tmp2_dict.keys())) > 0:
+	# 				self._data[grid][time_format].sortby(['lat', 'lon','time'])
+	#
+	# 	print(time.time() - start); start = time.time()
+	#
+	# 	print('Loaded data into self._data')
+	# 	for grid, tmp1_dict in self._data.items():
+	# 		for time_format, tmp in tmp1_dict.items():
+	# 			print('grid: '+grid)
+	# 			print('time format: '+time_format)
+	# 			print(tmp.coords,'\n')
+	# 			xr.Dataset({'data':tmp}).to_netcdf(self._working_dir+'gridded_data/'+'_'.join([self._iso,grid,time_format])+'.nc')
+	#
+	# 	print(time.time() - start); start = time.time()
+	#
+	#
 
 #
