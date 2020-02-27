@@ -10,7 +10,7 @@ sys.path.append('/Users/peterpfleiderer/Projects/regioClim_2020/shaped_analysis'
 import shaped_analysis; importlib.reload(shaped_analysis)
 
 start = time.time()
-COU = shaped_analysis.country_analysis(iso='GHA', working_directory='/Users/peterpfleiderer/Projects/regioClim_2020/cou_data/GHA')
+COU = shaped_analysis.country_analysis(iso='BEN', working_directory='/Users/peterpfleiderer/Projects/regioClim_2020/cou_data/BEN')
 COU.load_shapefile()
 print(time.time() - start); start = time.time()
 
@@ -26,12 +26,18 @@ print(time.time() - start); start = time.time()
 # COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_002_prmsl.nc',var_name='var2',given_var_name='mslp',tags={'scenario':'hist','experiment':'CORDEX','model':'had'})
 # COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_002_prmsl.nc',var_name='var2',given_var_name='mslp',tags={'scenario':'rcp45','experiment':'CORDEX','model':'had'})
 
-# COU.scout_data()
+COU.scout_data()
 # print(time.time() - start); start = time.time()
 
 
 COU.read_gridded()
+
+COU.unit_conversion('monthly', 'tas', addition=-273.15, factor=1)
+
+COU.print_data()
 print(time.time() - start); start = time.time()
+
+
 
 COU.area_average()
 COU.load_area_average()

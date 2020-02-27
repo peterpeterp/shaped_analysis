@@ -227,7 +227,7 @@ class country_analysis(object):
 					if add_mask is not None:
 						# population weighting
 						overlap[j,i] = intersect*add_mask[j,i]
-					if mask_style=='lat_weighted':
+					if mask_style=='latWeight':
 						# multiply overlap with latitude weighting
 						overlap[j,i] = intersect*np.cos(np.radians(lat[j]))
 
@@ -480,8 +480,6 @@ class country_analysis(object):
 				print(tmp.coords,'\n')
 				xr.Dataset({'data':tmp}).to_netcdf(self._working_dir+'gridded_data/'+'_'.join([self._iso,grid,time_format])+'.nc')
 
-		print(time.time() - start); start = time.time()
-
 	def load_data(self):
 		self._data = {}
 		for file_name in glob.glob(self._working_dir+'/gridded_data/*.nc'):
@@ -522,8 +520,13 @@ class country_analysis(object):
 				for time_format,tmp2 in tmp1.items():
 					for tag_combi in tmp2.values():
 						for mask_style,mask in self._masks[grid].items():
+							if tag_combi['var_name'] == 'tas':
+								asdas
+
 							tmp = self._data[grid][time_format].loc[tuple(tag_combi[dim] for dim in self._data[grid][time_format].dims[:-3])].copy()
 							nans = np.isnan(tmp)
+							missing_in_mask = np.isfinite(np.nanmean(tmp,axis=0))
+							# mask.values[np.isnan(mask.values)] = 0
 							tmp *= mask.loc[region]
 							av = tmp.sum(axis=(-2,-1))
 							av.values[np.all(nans, axis=(1,2))] = np.nan
@@ -550,8 +553,8 @@ class country_analysis(object):
 
 							av = av[np.where(np.all(nans, axis=(1,2))==False)[0]]
 
-							if tag_combi['var_name'] == 'tas' and av.min()<250 and av.min()>0:
-								asdas
+							# if tag_combi['var_name'] == 'tas' and av.min()<250 and av.min()>0:
+							# 	asdas
 
 							tmp_ = xr.Dataset({'value':av}).to_dataframe()
 							tmp_ = tmp_.drop(columns=['region'])
@@ -593,6 +596,26 @@ class country_analysis(object):
 						indices.append(tmp[time_format][key].values)
 				return tmp[time_format].loc[tuple(indices)]
 
+	def unit_conversion(self, time_format, var_name, addition=0, factor=1):
+		tags = {'var_name':var_name}
+		indices = []
+		for grid,tmp in self._data.items():
+			found_dims = []
+			for key in tags.keys():
+				if key in tmp[time_format].dims:
+					found_dims.append(key)
+			if len(found_dims) == len(list(tags.keys())):
+				for key in tmp[time_format].dims[:-2]:
+					if key in tags.keys():
+						indices.append(tags[key])
+					else:
+						indices.append(tmp[time_format][key].values)
+
+				print(indices)
+				print(np.nanmedian(tmp[time_format].loc[tuple(indices)]))
+				tmp[time_format].loc[tuple(indices)] += addition
+				tmp[time_format].loc[tuple(indices)] *= factor
+				print(np.nanmedian(tmp[time_format].loc[tuple(indices)]))
 
 
 	# def harmonize_data(self):
