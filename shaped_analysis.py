@@ -520,8 +520,8 @@ class country_analysis(object):
 				for time_format,tmp2 in tmp1.items():
 					for tag_combi in tmp2.values():
 						for mask_style,mask in self._masks[grid].items():
-							if tag_combi['var_name'] == 'tas':
-								asdas
+							# if tag_combi['var_name'] == 'tas':
+							# 	asdas
 
 							tmp = self._data[grid][time_format].loc[tuple(tag_combi[dim] for dim in self._data[grid][time_format].dims[:-3])].copy()
 							nans = np.isnan(tmp)

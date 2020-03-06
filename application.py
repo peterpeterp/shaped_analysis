@@ -1,5 +1,5 @@
 
-import os,sys, importlib
+import os,sys, importlib, time
 import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
@@ -10,7 +10,7 @@ sys.path.append('/Users/peterpfleiderer/Projects/regioClim_2020/shaped_analysis'
 import shaped_analysis; importlib.reload(shaped_analysis)
 
 start = time.time()
-COU = shaped_analysis.country_analysis(iso='BEN', working_directory='/Users/peterpfleiderer/Projects/regioClim_2020/cou_data/BEN')
+COU = shaped_analysis.country_analysis(iso='GHA', working_directory='/Users/peterpfleiderer/Projects/regioClim_2020/cou_data/GHA')
 COU.load_shapefile()
 print(time.time() - start); start = time.time()
 
@@ -19,12 +19,6 @@ print(time.time() - start); start = time.time()
 # COU.create_masks(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_vws.nc', mask_style='pop2015',add_mask_file = '/Users/peterpfleiderer/Projects/data/data_universal/population_2015_incrLat.nc', add_mask_name='pop2015', add_mask_var='mask')
 COU.load_mask()
 print(time.time() - start); start = time.time()
-
-# # COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/SST/COBE_sst_mon.nc',var_name='sst',given_var_name='SST',tag='test')
-# COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_002_prmsl.nc',var_name='var2',given_var_name='mslp',tags={'scenario':'hist','experiment':'CORDEX','model':'mpi'})
-# COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_002_prmsl.nc',var_name='var2',given_var_name='mslp',tags={'scenario':'rcp45','experiment':'CORDEX','model':'mpi'})
-# COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_002_prmsl.nc',var_name='var2',given_var_name='mslp',tags={'scenario':'hist','experiment':'CORDEX','model':'had'})
-# COU.zoom_data(input_file='/Users/peterpfleiderer/Projects/data/JRA55/mon_JRA55_002_prmsl.nc',var_name='var2',given_var_name='mslp',tags={'scenario':'rcp45','experiment':'CORDEX','model':'had'})
 
 COU.scout_data()
 # print(time.time() - start); start = time.time()
@@ -42,35 +36,83 @@ print(time.time() - start); start = time.time()
 COU.area_average()
 COU.load_area_average()
 
-asds
-
-for grid,tmp1 in COU._data.items():
-	for time_format,data in tmp1.items():
-		print(data.dims)
-		for dim in [dim for dim in data.dims if dim not in ['lat','lon','time']]:
-			print(dim)
-			for var in data.coords[dim].values:
-				print(var)
-				print(np.all())
-
-				indices = []
-				for key in [dim for dim in data.dims if dim not in ['lat','lon','time']]:
-					if key == dim:
-						indices.append([kk for kk in data.coords[key].values if kk!=var])
-					else:
-						indices.append(data.coords[key].values)
-				print()
 
 
+
+
+plt.close('all')
+tmp = COU.select_data('monthly',tags={'scenario':'historical','experiment':'EWEMBI','model':'EWEMBI','var_name':'pr','region':'GHA','mask_style':'latWeight'})
+ewembi = tmp.loc[np.datetime64(str(1986)+'-01-15'):np.datetime64(str(2005)+'-12-31')]
+ewembi = ewembi.groupby('time.month').mean('time')
+
+tmp = COU.select_data('monthly',tags={'scenario':'historical','experiment':'CORDEX','var_name':'pr','region':'GHA','mask_style':'latWeight'})
+hist = tmp[:,np.all(np.isnan(tmp), axis=0)==False]
+hist = hist.loc[:,np.datetime64(str(1986)+'-01-15'):np.datetime64(str(2005)+'-12-31')]
+hist = hist.groupby('time.month').mean('time')
+
+tmp = COU.select_data('monthly',tags={'scenario':'rcp45','experiment':'CORDEX','var_name':'pr','region':'GHA','mask_style':'latWeight'})
+proj = tmp[:,np.all(np.isnan(tmp), axis=0)==False]
+proj = proj.loc[:,np.datetime64(str(2040)+'-01-15'):np.datetime64(str(2060)+'-12-31')]
+proj = proj.groupby('time.month').mean('time')
+
+fig,axes=plt.subplots(nrows=2,ncols=1,sharex=True,figsize=(5,4))
+ax = axes[0]
+ax.plot(ewembi.month, np.mean(hist,axis=0), color='green', label='model data')
+ax.fill_between(ewembi.month,np.min(hist,axis=0),np.max(hist,axis=0), alpha=0.2, color='green')
+ax.plot(ewembi.month, ewembi.values, color='k', label='observations (EWEMBI)')
+leg = axes[0].legend(loc='best',fancybox=True,fontsize=10)
+leg.get_frame().set_alpha(0.3)
+
+ax = axes[1]
+ax.plot(ewembi.month, np.mean(proj-hist,axis=0), label='projected change', color='green')
+ax.fill_between(ewembi.month,np.min(proj-hist,axis=0),np.max(proj-hist,axis=0), alpha=0.2, color='green')
+leg = axes[1].legend(loc='best',fancybox=True,fontsize=10)
+leg.get_frame().set_alpha(0.3)
+ax.set_xticks(range(1,13))
+ax.set_xticklabels(['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'])
+
+ax.set_ylabel(' ')
+ax.set_xlabel('year')
+plt.annotate('label', xy=(0.01,0.5), xycoords='figure fraction', rotation=90)
+# ax.set_title(u''+COU._region_names[s['region']].replace('_',' ')+' '+season_dict[s['season']]['name'][lang].replace('*','')+' RCP4.5',fontsize=12)
+plt.savefig('test.pdf', bbox_inches='tight')
 
 
 asdas
-# COU.area_average()
-COU.load_area_average()
 
 
 
-asdasd
+
+
+plt.close('all')
+tmp = COU.select_data('monthly',tags={'scenario':'historical','experiment':'CORDEX','var_name':'tas','region':'GHA','mask_style':'latWeight'})
+hist = tmp[:,np.all(np.isnan(tmp), axis=0)==False]
+
+tmp = COU.select_data('monthly',tags={'scenario':'rcp45','experiment':'CORDEX','var_name':'tas','region':'GHA','mask_style':'latWeight'})
+proj = tmp[:,np.all(np.isnan(tmp), axis=0)==False]
+
+tmp = xr.concat((hist,proj), dim='time')
+
+relMon = np.zeros(tmp.time.shape[0], np.bool)
+for mon in range(1,13):
+	relMon[tmp.time.dt.month.values == mon] = True
+
+tmp = tmp[:,relMon]
+tmp = tmp.groupby('time.year').mean('time')
+
+ens = tmp.copy()
+for model in tmp.model:
+	ens.loc[model] = tmp.loc[model].rolling(year=20, center=True).mean()
+
+plt.plot(ens.year.values,ens.mean('model'))
+plt.fill_between(ens.year.values,ens.min('model'),ens.max('model'), alpha=0.2)
+
+# plt.fill_between(mean_.year.values,min_,max_, alpha=0.2)
+plt.legend()
+plt.ylabel('temperature [K]')
+plt.xlabel('year')
+plt.savefig('new_tas_benin.png')
+
 
 
 ref = COU.select_data_gridded(time_format='monthly',tags={'scenario':'historical','experiment':'CORDEX','var_name':'pr'})
@@ -120,7 +162,7 @@ plt.savefig(COU._working_dir+'plots/map.png', bbox_inches='tight')
 
 plt.close()
 for scenario in ['historical','rcp45']:
-	tmp = COU.select_data('monthly',tags={'scenario':scenario,'experiment':'CORDEX','var_name':'tas','region':'BEN','mask_style':'latWeight'})
+	tmp = COU.select_data('monthly',tags={'scenario':scenario,'experiment':'CORDEX','var_name':'tas','region':'GHA','mask_style':'latWeight'})
 	tmp = tmp[:,np.all(np.isnan(tmp), axis=0)==False]
 
 	relMon = np.zeros(tmp.time.shape[0], np.bool)
@@ -147,7 +189,7 @@ plt.savefig(COU._working_dir+'plots/transient.png')
 plt.close()
 for mask_style,color in zip(['latWeight','pop2015','ppp2005'],['green','orange','red']):
 	for scenario in ['historical','rcp45']:
-		tmp = COU.select_data('monthly',tags={'scenario':scenario,'experiment':'CORDEX','var_name':'tas','region':'BEN','mask_style':mask_style})
+		tmp = COU.select_data('monthly',tags={'scenario':scenario,'experiment':'CORDEX','var_name':'tas','region':'GHA','mask_style':mask_style})
 		tmp = tmp[:,np.all(np.isnan(tmp), axis=0)==False]
 		tmp = tmp.groupby('time.year').mean('time')
 		plt.plot(tmp.year.values,tmp.mean(axis=0), color = color, label=mask_style)
@@ -168,7 +210,7 @@ asdas
 
 
 
-# COU = country_analysis(iso='BEN', working_directory='/home/pepflei/regioClim_2020/cou_data/BEN')
+# COU = country_analysis(iso='GHA', working_directory='/home/pepflei/regioClim_2020/cou_data/GHA')
 # # COU.download_shapefile()
 # COU.load_shapefile()
 # # COU.create_masks(input_file='/p/projects/ikiimp/RCM_BC/ISIMIP2b_bc/GCMinput/monthly/pr/mon_pr_ECEARTH_rcp45_.nc4', mask_style='pop2015',add_mask_file = '/home/pepflei/CA/masks/population/population_1990_incrLat.nc', add_mask_name='pop2015', add_mask_var='mask')
