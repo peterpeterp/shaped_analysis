@@ -69,33 +69,41 @@ class country_analysis(object):
 
 	def load_shapefile(self):
 
-		adm_shapefiles=shapereader.Reader(self._working_dir+self._iso+'_adm_shp/'+self._iso+'_adm1.shp').records()
-		# collect all shapes of region
-		self._region_polygons={}
-		for item in adm_shapefiles:
-			shape,region=item.geometry,item.attributes
-			region = {k.lower():v for k,v in region.items()}
-			name_full = u''+region['name_1']
-			try:
-				name=u''+region[u'hasc_1']
-			except:
-				print(region)
-				name=u''+region[u'type_1']
-			self._region_names[name]=name_full
-			# simplify could be added here to speed up things
-			try:
-				self._region_polygons[name]=MultiPolygon(shape)
-			except:
-				self._region_polygons[name]=Polygon(shape)
+		if os.path.isfile(self._working_dir+'region_polygons.pkl'):
+			self._region_names = load_pkl(self._working_dir+'region_names.pkl')
+			self._region_polygons = load_pkl(self._working_dir+'region_polygons.pkl')
 
-		name=self._iso
-		self._region_names[name]=name
-		try:
-			adm_shapefiles=shapereader.Reader(self._working_dir+self._iso+'_adm_shp/'+self._iso+'_adm0.shp').records()
-			self._region_polygons[self._iso]=MultiPolygon(next(adm_shapefiles).geometry)
-		except:
-			adm_shapefiles=shapereader.Reader(self._working_dir+self._iso+'_adm_shp/'+self._iso+'_adm0.shp').records()
-			self._region_polygons[self._iso]=Polygon(next(adm_shapefiles).geometry)
+		else:
+			adm_shapefiles=shapereader.Reader(self._working_dir+self._iso+'_adm_shp/'+self._iso+'_adm1.shp').records()
+			# collect all shapes of region
+			self._region_polygons={}
+			for item in adm_shapefiles:
+				shape,region=item.geometry,item.attributes
+				region = {k.lower():v for k,v in region.items()}
+				name_full = u''+region['name_1']
+				try:
+					name=u''+region[u'hasc_1']
+				except:
+					print(region)
+					name=u''+region[u'type_1']
+				self._region_names[name]=name_full
+				# simplify could be added here to speed up things
+				try:
+					self._region_polygons[name]=MultiPolygon(shape)
+				except:
+					self._region_polygons[name]=Polygon(shape)
+
+			name=self._iso
+			self._region_names[name]=name
+			try:
+				adm_shapefiles=shapereader.Reader(self._working_dir+self._iso+'_adm_shp/'+self._iso+'_adm0.shp').records()
+				self._region_polygons[self._iso]=MultiPolygon(next(adm_shapefiles).geometry)
+			except:
+				adm_shapefiles=shapereader.Reader(self._working_dir+self._iso+'_adm_shp/'+self._iso+'_adm0.shp').records()
+				self._region_polygons[self._iso]=Polygon(next(adm_shapefiles).geometry)
+
+			save_pkl(self._region_names, self._working_dir+'region_names.pkl')
+			save_pkl(self._region_polygons, self._working_dir+'region_polygons.pkl')
 
 		print(self._region_names)
 
@@ -568,8 +576,13 @@ class country_analysis(object):
 
 		xr.Dataset(self._areaAverage).to_netcdf(self._working_dir+self._iso+'_areaAverages.nc')
 
+	def load_area_average_old(self):
+		self._areaAverage = xr.open_dataset(self._working_dir+self._iso+'_areaAverages.nc')
+
 	def load_area_average(self):
 		self._areaAverage = xr.open_dataset(self._working_dir+self._iso+'_areaAverages.nc')
+
+
 
 	def select_data(self, time_format, tags):
 		tmp = self._areaAverage[time_format]
