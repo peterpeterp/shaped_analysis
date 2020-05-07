@@ -1,5 +1,5 @@
 
-import os,sys, importlib, time
+import os,sys, importlib, time, pickle
 import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
@@ -10,8 +10,38 @@ sys.path.append('/Users/peterpfleiderer/Projects/regioClim_2020/shaped_analysis'
 import shaped_analysis; importlib.reload(shaped_analysis)
 
 start = time.time()
-COU = shaped_analysis.country_analysis(iso='GHA', working_directory='/Users/peterpfleiderer/Projects/regioClim_2020/cou_data/GHA')
+COU = shaped_analysis.country_analysis(iso='BEN', working_directory='/Users/peterpfleiderer/Projects/regioClim_2020/cou_data/BEN')
+COU.load_area_average()
+
+tmp = COU.select_data('monthly',tags={'scenario':'historical','experiment':'CORDEX','region':'BEN','var_name':'tas','mask_style':'latWeight'})
+
+tmp = xr.open_mfdataset(COU._working_dir+'areaAverage/*_'+'monthly'+'_areaAverage.nc', concat_dim='region', combine='nested')
+
 COU.load_shapefile()
+
+COU.load_mask()
+COU.load_data()
+COU.area_average(['BEN'])
+
+coords_dict_area = load_pkl(COU._working_dir+'coords_areaAverage.pkl')
+
+for grid,tmp1 in COU._masks.items():
+	for mask_style,tmp2 in tmp1.items():
+		tmp = tmp2.loc[['BEN']] * 0
+		tmp.region.values = ['BJ.AK+BJ.AL']
+		for reg in 'BJ.AK+BJ.AL'.split('+'):
+			ttmp = tmp2.loc[reg]
+			ttmp.values[np.isnan(ttmp.values)] = 0
+			tmp.values += ttmp.values
+		tmp.values /= tmp.sum().values
+
+		COU._masks[grid][mask_style] = xr.concat((tmp2,tmp), dim='region')
+
+
+
+
+
+
 print(time.time() - start); start = time.time()
 
 # COU.identify_grid('/Users/peterpfleiderer/Projects/data/SST/COBE_sst_mon.nc')

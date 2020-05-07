@@ -502,7 +502,7 @@ class country_analysis(object):
 
 			self._data[grid][time_format] = nc_in['data'] * mask
 
-	def area_average(self, regions=None):
+	def area_average_old(self, regions=None):
 		tag_combinations = load_pkl(self._working_dir+'meta_info.pkl')
 		coords_area = load_pkl(self._working_dir+'coords_areaAverage.pkl')
 		self._areaAverage = {}
@@ -540,8 +540,8 @@ class country_analysis(object):
 							av.values[np.all(nans, axis=(1,2))] = np.nan
 
 							tag_combi_ = tag_combi.copy()
-							tag_combi_['region'] = region
 							tag_combi_['mask_style'] = mask_style
+							tag_combi_['region'] = region
 							indices = [tag_combi_[dim] for dim  in self._areaAverage[time_format].dims if dim not in ['time']]
 
 							if len(indices) == 0:
@@ -574,15 +574,83 @@ class country_analysis(object):
 			for time_format in time_formats:
 				csv.to_csv(self._working_dir+'areaAverage/'+region+'_'+time_format+'_areaAverage.csv')
 
+
+				'''
+				go back to xarray here and save
+				'''
+
 		xr.Dataset(self._areaAverage).to_netcdf(self._working_dir+self._iso+'_areaAverages.nc')
+
+
+
+	def area_average(self, regions=None):
+		tag_combinations = load_pkl(self._working_dir+'meta_info.pkl')
+		coords_area = load_pkl(self._working_dir+'coords_areaAverage.pkl')
+		time_formats = np.array([[time_format for time_format in tmp1.keys()] for tmp1 in tag_combinations.values()]).flatten()
+
+		if regions is None:
+			regions = self._region_names.keys()
+
+		for region in regions:
+			for time_format in time_formats:
+				dims = [dim for dim in coords_area[time_format].keys() if dim not in ['lat','lon','time']] + ['time']
+				coords = {dim:coords_area[time_format][dim]  for dim in dims}
+				coords['mask_style'] = np.array([list(tmp1.keys()) for grid,tmp1 in self._masks.items()]).flatten()
+				dims = ['mask_style'] + dims
+				tmp_xr = xr.DataArray(data=np.zeros([len(coords[key]) for key in dims])*np.nan, coords=coords, dims=dims)
+
+				for grid,tmp1 in tag_combinations.items():
+					for time_format,tmp2 in tmp1.items():
+						for tag_combi in tmp2.values():
+							for mask_style,mask in self._masks[grid].items():
+								# if tag_combi['var_name'] == 'tas':
+								# 	asdas
+
+								tmp = self._data[grid][time_format].loc[tuple(tag_combi[dim] for dim in self._data[grid][time_format].dims[:-3])].copy()
+								nans = np.isnan(tmp)
+								missing_in_mask = np.isfinite(np.nanmean(tmp,axis=0))
+								# mask.values[np.isnan(mask.values)] = 0
+								tmp *= mask.loc[region]
+								av = tmp.sum(axis=(-2,-1))
+								av.values[np.all(nans, axis=(1,2))] = np.nan
+
+								tag_combi_ = tag_combi.copy()
+								tag_combi_['region'] = region
+								tag_combi_['mask_style'] = mask_style
+								indices = [tag_combi_[dim] for dim  in tmp_xr.dims if dim not in ['time']]
+
+								if len(indices) == 0:
+									tmp_xr.loc[av.time] = av
+								if len(indices) == 1:
+									tmp_xr.loc[indices[0],av.time] = av
+								if len(indices) == 2:
+									tmp_xr.loc[indices[0],indices[1],av.time] = av
+								if len(indices) == 3:
+									tmp_xr.loc[indices[0],indices[1],indices[2],av.time] = av
+								if len(indices) == 4:
+									tmp_xr.loc[indices[0],indices[1],indices[2],indices[3],av.time] = av
+								if len(indices) == 5:
+									tmp_xr.loc[indices[0],indices[1],indices[2],indices[3],indices[4],av.time] = av
+								if len(indices) == 6:
+									tmp_xr.loc[indices[0],indices[1],indices[2],indices[3],indices[4],indices[5],av.time] = av
+
+				os.system('rm '+self._working_dir+'areaAverage/'+region+'_'+time_format+'_areaAverage.nc')
+				xr.Dataset({'area_average':tmp_xr}).to_netcdf(self._working_dir+'areaAverage/'+region+'_'+time_format+'_areaAverage.nc')
+
+
 
 	def load_area_average_old(self):
 		self._areaAverage = xr.open_dataset(self._working_dir+self._iso+'_areaAverages.nc')
 
 	def load_area_average(self):
-		self._areaAverage = xr.open_dataset(self._working_dir+self._iso+'_areaAverages.nc')
-
-
+		tag_combinations = load_pkl(self._working_dir+'meta_info.pkl')
+		self._areaAverage = {}
+		time_formats = np.array([[time_format for time_format in tmp1.keys()] for tmp1 in tag_combinations.values()]).flatten()
+		self._areaAverage = {}
+		for time_format in time_formats:
+			tmp = xr.open_mfdataset(self._working_dir+'areaAverage/*_'+time_format+'_areaAverage.nc', concat_dim='region', combine='nested')
+			tmp.coords['region'] = [ff.split('/')[-1].split('_')[0] for ff in glob.glob(self._working_dir+'areaAverage/*_'+time_format+'_areaAverage.nc')]
+			self._areaAverage[time_format] = tmp['area_average'].load()
 
 	def select_data(self, time_format, tags):
 		tmp = self._areaAverage[time_format]
