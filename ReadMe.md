@@ -1,6 +1,6 @@
 # Installation
 
-This project requires python2.7 with the following packages:  
+This project requires python3 with the following packages:  
 - numpy
 - scipy
 - netCDF4
@@ -8,16 +8,8 @@ This project requires python2.7 with the following packages:
 - shapely
 - pandas
 - cartopy
-- dimarray
+- xarray
 
+class_on_shape.py is the main class
 
-```
-conda create --name some_name
-conda install numpy scipy netCDF4 matplotlib shapely pandas
-```
-the two packages pycountry is not found by conda, install them using pip
-```
-conda install -c conda-forge cartopy
-```
-
-* extract the BEN.tar.gz for testing
+an application is shown in the tutorial
