@@ -478,20 +478,6 @@ class shaped_object(object):
 				print(tmp.coords,'\n')
 				xr.Dataset({'data':tmp}).to_netcdf(self._working_dir+'gridded_data/'+'_'.join([self._iso,grid,time_format])+'.nc')
 
-	def load_griddedData(self):
-		self._data = {}
-		for file_name in glob.glob(self._working_dir+'/gridded_data/*.nc'):
-			nc_in = xr.open_dataset(file_name)
-			time_format = file_name.split('_')[-1].split('.')[0]
-			grid = file_name.split('_')[-2]
-			if grid not in self._data.keys():
-				self._data[grid] = {}
-			mask = self._masks[grid]['latWeight'].loc[self._iso]
-			mask.values[mask.values==0] = np.nan
-			mask.values[mask.values>0] = 1
-
-			self._data[grid][time_format] = nc_in['data'] * mask
-
 	def calculate_areaAverage(self, regions=None):
 		tag_combinations = load_pkl(self._working_dir+'meta_info.pkl')
 		coords_area = load_pkl(self._working_dir+'coords_areaAverage.pkl')
