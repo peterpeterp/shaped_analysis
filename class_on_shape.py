@@ -542,7 +542,8 @@ class shaped_object(object):
 								if len(indices) == 6:
 									tmp_xr.loc[indices[0],indices[1],indices[2],indices[3],indices[4],indices[5],av.time] = av
 
-				os.system('rm '+self._working_dir+'areaAverage/'+region+'_'+time_format+'_areaAverage.nc')
+				if os.path.isfile(self._working_dir+'areaAverage/'+region+'_'+time_format+'_areaAverage.nc'):
+					os.system('rm '+self._working_dir+'areaAverage/'+region+'_'+time_format+'_areaAverage.nc')
 				xr.Dataset({'areaAverage':tmp_xr}).to_netcdf(self._working_dir+'areaAverage/'+region+'_'+time_format+'_areaAverage.nc')
 
 	def load_areaAverage(self):
