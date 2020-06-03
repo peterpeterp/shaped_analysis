@@ -8,4 +8,5 @@ example/*
 !example/example_data
 !example/example_Benin.ipynb
 __pycache__
+
 .ipynb_checkpoints
