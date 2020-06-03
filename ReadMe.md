@@ -12,4 +12,4 @@ This project requires python3 with the following packages:
 
 class_on_shape.py is the main class
 
-an application is shown in the tutorial
+There is an example application: example/example_Benin.ipynb
